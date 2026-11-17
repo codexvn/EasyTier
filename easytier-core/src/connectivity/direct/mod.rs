@@ -680,6 +680,19 @@ where
             Vec::new()
         };
         crate::foundation::time::timeout(DIRECT_CONNECT_TIMEOUT, async {
+            if url.scheme() == "quic" {
+                let tunnel = transport::connect_quic_candidates(
+                    self.host.clone(),
+                    self.protocol.clone(),
+                    remote_addr,
+                    bind_addrs,
+                    self.options.udp_bind.clone(),
+                    url,
+                    DIRECT_CONNECT_TIMEOUT,
+                )
+                .await?;
+                return self.admit(tunnel, dst_peer_id).await;
+            }
             let connected = match transport {
                 DirectTransport::Tcp(purpose) => ConnectedTransport::Tcp(
                     transport::connect_tcp(

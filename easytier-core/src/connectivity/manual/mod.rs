@@ -863,6 +863,20 @@ where
                 });
         }
         let transport = transport.expect("non-Ring endpoint should have a transport");
+        if endpoint.url.scheme() == "quic"
+            && let Some((remote_addr, bind_addrs)) = &resolved
+        {
+            return transport::connect_quic_candidates(
+                data.host.clone(),
+                data.protocol.clone(),
+                *remote_addr,
+                bind_addrs.clone(),
+                data.options.udp_bind.clone(),
+                endpoint.url,
+                connect_timeout.saturating_sub(started_at.elapsed()),
+            )
+            .await;
+        }
         let connected = match resolved {
             Some((remote_addr, bind_addrs)) => {
                 connect_resolved(
