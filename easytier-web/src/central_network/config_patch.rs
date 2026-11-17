@@ -231,9 +231,7 @@ impl NetworkConfigField {
             Self::ProxyCidrs => &["proxy_cidrs"],
             Self::VpnPortalEnabled => &["vpn_portal_config", "enabled"],
             Self::VpnPortalWireguardListen => &["vpn_portal_config", "wireguard_listen"],
-            Self::VpnPortalWireguardPrivateKey => {
-                &["vpn_portal_config", "wireguard_private_key"]
-            }
+            Self::VpnPortalWireguardPrivateKey => &["vpn_portal_config", "wireguard_private_key"],
             Self::VpnPortalClients => &["vpn_portal_config", "clients"],
         }
     }
@@ -426,7 +424,8 @@ fn to_json<T: Serialize>(value: &T) -> Result<Value, NetworkConfigPatchError> {
 }
 
 fn from_json<T: for<'de> Deserialize<'de>>(value: Value) -> Result<T, NetworkConfigPatchError> {
-    serde_json::from_value(value).map_err(|error| NetworkConfigPatchError::Invalid(error.to_string()))
+    serde_json::from_value(value)
+        .map_err(|error| NetworkConfigPatchError::Invalid(error.to_string()))
 }
 
 fn field_value(value: &Value, field: NetworkConfigField) -> Option<Value> {
@@ -487,15 +486,22 @@ mod tests {
                 proxy_cidrs: Vec::new(),
                 ..Default::default()
             },
-            set_fields: [NetworkConfigField::EnableUdpFec, NetworkConfigField::ProxyCidrs]
-                .into_iter()
-                .collect(),
+            set_fields: [
+                NetworkConfigField::EnableUdpFec,
+                NetworkConfigField::ProxyCidrs,
+            ]
+            .into_iter()
+            .collect(),
             clear_fields: BTreeSet::new(),
         };
         let sanitized = patch.sanitize().unwrap();
         assert_eq!(sanitized.values.enable_udp_fec, Some(false));
         assert!(sanitized.values.proxy_cidrs.is_empty());
-        assert!(sanitized.set_fields.contains(&NetworkConfigField::ProxyCidrs));
+        assert!(
+            sanitized
+                .set_fields
+                .contains(&NetworkConfigField::ProxyCidrs)
+        );
         assert!(sanitized.clear_fields.is_empty());
     }
 
@@ -530,7 +536,9 @@ mod tests {
             }),
             ..Default::default()
         };
-        patch.apply_to(&mut target, &NetworkConfig::default()).unwrap();
+        patch
+            .apply_to(&mut target, &NetworkConfig::default())
+            .unwrap();
         let portal = target.vpn_portal_config.unwrap();
         assert_eq!(portal.enabled, Some(true));
         assert_eq!(portal.wireguard_listen, "0.0.0.0:11013");
@@ -612,9 +620,12 @@ mod tests {
 
         let mut patch = NetworkConfigPatch {
             values: duplicate,
-            set_fields: [NetworkConfigField::MappedListeners, NetworkConfigField::ProxyCidrs]
-                .into_iter()
-                .collect(),
+            set_fields: [
+                NetworkConfigField::MappedListeners,
+                NetworkConfigField::ProxyCidrs,
+            ]
+            .into_iter()
+            .collect(),
             clear_fields: BTreeSet::new(),
         };
         patch
@@ -622,13 +633,12 @@ mod tests {
             .unwrap();
         // The empty list equal to the reset default drops out; the
         // member-specific proxy CIDR list stays.
-        assert!(!patch
-            .set_fields
-            .contains(&NetworkConfigField::MappedListeners));
-        assert!(patch.set_fields.contains(&NetworkConfigField::ProxyCidrs));
-        assert_eq!(
-            patch.values.proxy_cidrs,
-            vec!["10.90.0.0/24".to_owned()]
+        assert!(
+            !patch
+                .set_fields
+                .contains(&NetworkConfigField::MappedListeners)
         );
+        assert!(patch.set_fields.contains(&NetworkConfigField::ProxyCidrs));
+        assert_eq!(patch.values.proxy_cidrs, vec!["10.90.0.0/24".to_owned()]);
     }
 }

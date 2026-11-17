@@ -18,7 +18,7 @@ use rand::{RngCore as _, rngs::OsRng};
 use sea_orm::{ColumnTrait as _, EntityTrait as _, QueryFilter as _, QueryOrder as _};
 use uuid::Uuid;
 
-use super::config_patch::{current_core_defaults, NetworkConfigField, NetworkConfigPatch};
+use super::config_patch::{NetworkConfigField, NetworkConfigPatch, current_core_defaults};
 use super::model::{
     AclPolicy, CentralNetworkIntent, CredentialGrant, NetworkCredentialIntent, NetworkMemberIntent,
     NetworkMode, member_group_name,
@@ -1705,7 +1705,7 @@ mod tests {
 
     #[tokio::test]
     async fn resetting_config_defaults_marks_equal_member_fields_inherited() {
-        use crate::central_network::config_patch::{current_core_defaults, NetworkConfigField};
+        use crate::central_network::config_patch::{NetworkConfigField, current_core_defaults};
 
         let (service, user_id, _) = service().await;
         let device_id = Uuid::new_v4();
@@ -1752,12 +1752,16 @@ mod tests {
             .unwrap();
         // Fields equal to the reset default are now inherited from the
         // network while the original snapshot is preserved verbatim.
-        assert!(member
-            .config_override_inherit_fields
-            .contains(&sample_inherited_field));
-        assert!(!member
-            .config_override_inherit_fields
-            .contains(&NetworkConfigField::ProxyCidrs));
+        assert!(
+            member
+                .config_override_inherit_fields
+                .contains(&sample_inherited_field)
+        );
+        assert!(
+            !member
+                .config_override_inherit_fields
+                .contains(&NetworkConfigField::ProxyCidrs)
+        );
         let snapshot = member.config_override.as_ref().unwrap();
         assert_eq!(snapshot.proxy_cidrs, vec!["10.90.0.0/24".to_owned()]);
 
@@ -2987,10 +2991,7 @@ mod tests {
             .unwrap();
         assert!(info.enabled);
         let restored = load_member(&service, user_id, network_id, device_id).await;
-        assert_eq!(
-            restored.allocated_ipv4.as_deref(),
-            Some(assigned.as_str())
-        );
+        assert_eq!(restored.allocated_ipv4.as_deref(), Some(assigned.as_str()));
     }
 
     #[tokio::test]

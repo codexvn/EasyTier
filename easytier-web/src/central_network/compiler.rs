@@ -19,7 +19,7 @@ use easytier_core::{
 use uuid::Uuid;
 
 use super::{
-    config_patch::{current_core_defaults, NetworkConfigPatch, NetworkConfigPatchError},
+    config_patch::{NetworkConfigPatch, NetworkConfigPatchError, current_core_defaults},
     model::{
         AclAction, AclDestination, AclPolicy, AclProtocol, AclProtocolTarget, AclSource,
         CentralNetworkIntent, CredentialGrant, NetworkCredentialIntent, NetworkMemberIntent,
@@ -164,12 +164,10 @@ pub fn compile(intent: &CentralNetworkIntent) -> Result<CompiledNetwork, Compile
                 .config_defaults
                 .apply_to(&mut base_config, &core_defaults)
                 .map_err(|error| CompileError::InvalidNetworkConfig(error.to_string()))?;
-            let network_config =
-                apply_member_overrides(base_config, member, &core_defaults).map_err(|error| {
-                    CompileError::InvalidMemberConfig {
-                        member_id: member.id,
-                        reason: error.to_string(),
-                    }
+            let network_config = apply_member_overrides(base_config, member, &core_defaults)
+                .map_err(|error| CompileError::InvalidMemberConfig {
+                    member_id: member.id,
+                    reason: error.to_string(),
                 })?;
             validate_member_config(&network_config).map_err(|error| {
                 CompileError::InvalidMemberConfig {

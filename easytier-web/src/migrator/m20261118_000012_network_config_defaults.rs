@@ -72,10 +72,12 @@ mod tests {
             member.try_get::<String>("", "override_config").unwrap(),
             "{\"enable_udp_fec\":true}"
         );
-        assert!(member
-            .try_get::<Option<String>>("", "override_patch")
-            .unwrap()
-            .is_none());
+        assert!(
+            member
+                .try_get::<Option<String>>("", "override_patch")
+                .unwrap()
+                .is_none()
+        );
         assert_eq!(
             member
                 .try_get::<String>("", "override_inherit_fields")

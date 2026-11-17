@@ -80,12 +80,9 @@ fn sqlx_context(context: &str, error: sqlx::Error) -> CentralIntentError {
 
 fn prepare_intent(intent: CentralNetworkIntent) -> Result<PreparedIntent, CentralIntentError> {
     let compiled = compile(&intent)?;
-    let config_defaults = intent
-        .config_defaults
-        .sanitize()
-        .map_err(|error| {
-            CentralIntentError::InvalidStoredData(format!("invalid network defaults: {error}"))
-        })?;
+    let config_defaults = intent.config_defaults.sanitize().map_err(|error| {
+        CentralIntentError::InvalidStoredData(format!("invalid network defaults: {error}"))
+    })?;
     let config_defaults = json(&config_defaults)?;
     let (networking_method, public_server_url, raw_peer_urls) = match &intent.mode {
         NetworkMode::PublicServer { url } => ("PublicServer", Some(url.clone()), Vec::new()),
@@ -655,13 +652,12 @@ async fn load_intent(
         .map_err(|error| {
             CentralIntentError::InvalidStoredData(format!("invalid ACL policy: {error}"))
         })?;
-    let config_defaults: NetworkConfigPatch = serde_json::from_str(&config_defaults).map_err(
-        |error| {
+    let config_defaults: NetworkConfigPatch =
+        serde_json::from_str(&config_defaults).map_err(|error| {
             CentralIntentError::InvalidStoredData(format!(
                 "invalid network config defaults: {error}"
             ))
-        },
-    )?;
+        })?;
 
     type CredentialRow = (String, String, i64, String, bool, String, bool);
     let credential_rows: Vec<CredentialRow> = sqlx::query_as(
@@ -777,14 +773,12 @@ async fn load_intent(
                                 "invalid member configuration patch: {error}"
                             ))
                         })?,
-                    config_override_inherit_fields: serde_json::from_str(
-                        &override_inherit_fields,
-                    )
-                    .map_err(|error| {
-                        CentralIntentError::InvalidStoredData(format!(
-                            "invalid inherited member fields: {error}"
-                        ))
-                    })?,
+                    config_override_inherit_fields: serde_json::from_str(&override_inherit_fields)
+                        .map_err(|error| {
+                            CentralIntentError::InvalidStoredData(format!(
+                                "invalid inherited member fields: {error}"
+                            ))
+                        })?,
                     credential_id,
                     acl_group_secret,
                     enabled,
