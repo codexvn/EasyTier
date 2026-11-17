@@ -8,14 +8,14 @@ on:
         type: boolean
         default: true
   push:
-    branches: [ "develop", "main", "releases/**" ]
+    branches: [ "develop", "main", "main-fix", "releases/**" ]
   pull_request:
     branches: [ "develop", "main" ]
     types: [ opened, synchronize, reopened, ready_for_review ]
 
 concurrency:
   # A new PR or branch push must not cancel a full build.
-  group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || startsWith(github.ref_name, 'releases/')) && 'full' || 'check' }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ (github.event_name == 'workflow_dispatch' || github.ref_name == 'main-fix' || startsWith(github.ref_name, 'releases/')) && 'full' || 'check' }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -46,7 +46,7 @@ jobs:
         "easytier-core/Cargo.toml", "easytier-proto/Cargo.toml",
         ".github/workflows/core.yml", ".github/actions/prepare-pnpm/**"]
     outputs:
-      full_build: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref_name, 'releases/') }}
+      full_build: ${{ github.event_name == 'workflow_dispatch' || github.ref_name == 'main-fix' || startsWith(github.ref_name, 'releases/') }}
       frontend_changed: ${{ steps.path_filter.outputs.frontend }}
       # Release builds must run even if they only change release metadata.
       should_skip: >-
@@ -59,11 +59,11 @@ jobs:
             )
           ) &&
           github.event_name != 'workflow_dispatch' &&
-          !startsWith(github.ref_name, 'releases/')
+          github.ref_name != 'main-fix' && !startsWith(github.ref_name, 'releases/')
         }}
     steps:
       - id: skip_check
-        if: github.event_name != 'workflow_dispatch' && !startsWith(github.ref_name, 'releases/')
+        if: github.event_name != 'workflow_dispatch' && github.ref_name != 'main-fix' && !startsWith(github.ref_name, 'releases/')
         uses: fkirc/skip-duplicate-actions@v5
         with:
           concurrent_skipping: 'same_content_newer'
@@ -91,9 +91,6 @@ jobs:
         include:
           - TARGET: x86_64-unknown-linux-musl
             OS: ubuntu-24.04
-            FEATURES: jemalloc
-          - TARGET: aarch64-apple-darwin
-            OS: macos-latest
             FEATURES: jemalloc
           - TARGET: x86_64-pc-windows-msvc
             OS: windows-latest
@@ -189,13 +186,6 @@ jobs:
             OS: ubuntu-24.04
             ARTIFACT_NAME: freebsd-13.2-x86_64
             BSD_VERSION: 13.2
-
-          - TARGET: x86_64-apple-darwin
-            OS: macos-latest
-            ARTIFACT_NAME: macos-x86_64
-          - TARGET: aarch64-apple-darwin
-            OS: macos-latest
-            ARTIFACT_NAME: macos-aarch64
 
           - TARGET: x86_64-pc-windows-msvc
             OS: windows-latest
