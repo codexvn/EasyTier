@@ -23,6 +23,10 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub override_config: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
+    pub override_patch: Option<String>,
+    #[sea_orm(column_type = "Text")]
+    pub override_inherit_fields: String,
+    #[sea_orm(column_type = "Text", nullable)]
     pub credential_id: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub acl_group_secret: Option<String>,

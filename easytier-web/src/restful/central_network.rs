@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use super::{AppStateInner, Error, HttpHandleError, authed_user_id, users::AuthSession};
 use crate::central_network::{
+    config_patch::NetworkConfigPatch,
     model::AclPolicy,
     service::{
         AddMembersReq, CentralNetworkService, CentralNetworkServiceError, GenerateCredentialReq,
@@ -136,6 +137,43 @@ impl CentralNetworkApi {
             .await
             .map_err(convert_error)?;
         Ok(StatusCode::NO_CONTENT)
+    }
+
+    async fn get_config_defaults(
+        auth: AuthSession,
+        Extension(service): Service,
+        Path(network_id): Path<Uuid>,
+    ) -> Result<Json<NetworkConfigPatch>, HttpHandleError> {
+        service
+            .get_config_defaults(user_id(&auth)?, network_id)
+            .await
+            .map(Json)
+            .map_err(convert_error)
+    }
+
+    async fn update_config_defaults(
+        auth: AuthSession,
+        Extension(service): Service,
+        Path(network_id): Path<Uuid>,
+        Json(request): Json<NetworkConfigPatch>,
+    ) -> Result<Json<NetworkConfigPatch>, HttpHandleError> {
+        service
+            .update_config_defaults(user_id(&auth)?, network_id, request)
+            .await
+            .map(Json)
+            .map_err(convert_error)
+    }
+
+    async fn reset_config_defaults(
+        auth: AuthSession,
+        Extension(service): Service,
+        Path(network_id): Path<Uuid>,
+    ) -> Result<Json<NetworkConfigPatch>, HttpHandleError> {
+        service
+            .reset_config_defaults(user_id(&auth)?, network_id)
+            .await
+            .map(Json)
+            .map_err(convert_error)
     }
 
     async fn list_members(
@@ -308,6 +346,14 @@ impl CentralNetworkApi {
                 get(Self::get_network)
                     .patch(Self::update_network)
                     .delete(Self::delete_network),
+            )
+            .route(
+                "/api/v1/networks/{network-id}/config-defaults",
+                get(Self::get_config_defaults).put(Self::update_config_defaults),
+            )
+            .route(
+                "/api/v1/networks/{network-id}/config-defaults/reset",
+                axum::routing::post(Self::reset_config_defaults),
             )
             .route(
                 "/api/v1/networks/{network-id}/acl-policy",

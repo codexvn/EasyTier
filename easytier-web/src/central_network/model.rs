@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use uuid::Uuid;
 
 use easytier::common::config::NetworkConfig;
+
+use super::config_patch::{NetworkConfigField, NetworkConfigPatch};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct CentralNetworkIntent {
@@ -17,6 +19,8 @@ pub struct CentralNetworkIntent {
     pub members: Vec<NetworkMemberIntent>,
     pub credentials: Vec<NetworkCredentialIntent>,
     pub acl_policy: Option<AclPolicy>,
+    #[serde(default)]
+    pub config_defaults: NetworkConfigPatch,
 }
 
 impl CentralNetworkIntent {
@@ -97,6 +101,10 @@ pub struct NetworkMemberIntent {
     pub allocated_ipv4: Option<String>,
     #[serde(default)]
     pub config_override: Option<NetworkConfig>,
+    #[serde(default)]
+    pub config_override_patch: Option<NetworkConfigPatch>,
+    #[serde(default)]
+    pub config_override_inherit_fields: BTreeSet<NetworkConfigField>,
     pub credential_id: Option<String>,
     /// HMAC material for permanent administrator group proofs. Temporary
     /// members authenticate their groups through their credential grant and

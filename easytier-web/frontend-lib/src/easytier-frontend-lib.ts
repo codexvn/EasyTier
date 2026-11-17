@@ -7,6 +7,7 @@ import PrimeVue from 'primevue/config'
 
 import I18nUtils from './modules/i18n'
 import * as NetworkTypes from './types/network'
+import * as NetworkDefaults from './types/network-defaults'
 import HumanEvent from './components/HumanEvent.vue';
 
 // do not use primevue tooltip, it has serious memory leak issue
@@ -71,4 +72,4 @@ const EasytierFrontendLib: { install: (app: App, options?: FrontendLibOptions) =
 
 export default EasytierFrontendLib;
 
-export { Config, ConfigEditDialog, RemoteManagement, Status, UrlListInput, I18nUtils, NetworkTypes, Api, Utils };
+export { Config, ConfigEditDialog, RemoteManagement, Status, UrlListInput, I18nUtils, NetworkTypes, NetworkDefaults, Api, Utils };

@@ -18,10 +18,13 @@ use easytier_core::{
 };
 use uuid::Uuid;
 
-use super::model::{
-    AclAction, AclDestination, AclPolicy, AclProtocol, AclProtocolTarget, AclSource,
-    CentralNetworkIntent, CredentialGrant, NetworkCredentialIntent, NetworkMemberIntent,
-    NetworkMode, member_group_name,
+use super::{
+    config_patch::{current_core_defaults, NetworkConfigPatch, NetworkConfigPatchError},
+    model::{
+        AclAction, AclDestination, AclPolicy, AclProtocol, AclProtocolTarget, AclSource,
+        CentralNetworkIntent, CredentialGrant, NetworkCredentialIntent, NetworkMemberIntent,
+        NetworkMode, member_group_name,
+    },
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -48,6 +51,8 @@ pub enum CompileError {
     InvalidUrl(String),
     #[error("manual networking requires at least one peer URL")]
     EmptyPeerUrls,
+    #[error("invalid network configuration defaults: {0}")]
+    InvalidNetworkConfig(String),
     #[error("duplicate device in network intent: {0}")]
     DuplicateDevice(String),
     #[error("invalid CIDR: {0}")]
@@ -90,6 +95,12 @@ pub fn compile(intent: &CentralNetworkIntent) -> Result<CompiledNetwork, Compile
     let credentials = normalized_credentials(&intent.credentials)?;
     validate_members(intent, &members, &credentials)?;
     validate_acl(intent.acl_policy.as_ref(), &members, &credentials)?;
+    let core_defaults = current_core_defaults()
+        .map_err(|error| CompileError::InvalidNetworkConfig(error.to_string()))?;
+    intent
+        .config_defaults
+        .validate_network_defaults()
+        .map_err(|error| CompileError::InvalidNetworkConfig(error.to_string()))?;
 
     let addresses = assign_addresses(intent.virtual_cidr.as_deref(), &members)?;
     let acl = compile_acl(intent.acl_policy.as_ref(), &members);
@@ -116,7 +127,7 @@ pub fn compile(intent: &CentralNetworkIntent) -> Result<CompiledNetwork, Compile
                 .map(|subnet| i32::from(subnet.prefix))
                 .or(Some(24));
 
-            let base_config = NetworkConfig {
+            let mut base_config = NetworkConfig {
                 instance_id: Some(intent.id.to_string()),
                 dhcp: Some(address.is_none()),
                 virtual_ipv4: address.map(|address| address.to_string()),
@@ -147,8 +158,17 @@ pub fn compile(intent: &CentralNetworkIntent) -> Result<CompiledNetwork, Compile
                 acl: acl.get(&member.id).cloned().flatten(),
                 ..Default::default()
             };
+            intent
+                .config_defaults
+                .apply_to(&mut base_config, &core_defaults)
+                .map_err(|error| CompileError::InvalidNetworkConfig(error.to_string()))?;
             let network_config =
-                apply_member_override(base_config, member.config_override.as_ref());
+                apply_member_overrides(base_config, member, &core_defaults).map_err(|error| {
+                    CompileError::InvalidMemberConfig {
+                        member_id: member.id,
+                        reason: error.to_string(),
+                    }
+                })?;
             validate_member_config(&network_config).map_err(|error| {
                 CompileError::InvalidMemberConfig {
                     member_id: member.id,
@@ -183,14 +203,28 @@ fn validate_member_config(config: &NetworkConfig) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn apply_member_override(
+fn apply_member_overrides(
     base: NetworkConfig,
-    config_override: Option<&NetworkConfig>,
-) -> NetworkConfig {
-    let Some(config_override) = config_override else {
-        return base;
-    };
-    let mut merged = config_override.clone();
+    member: &NetworkMemberIntent,
+    core_defaults: &NetworkConfig,
+) -> Result<NetworkConfig, NetworkConfigPatchError> {
+    let central_config = base.clone();
+    let mut merged = base;
+    if let Some(config_override) = &member.config_override {
+        NetworkConfigPatch::from_legacy_snapshot(
+            config_override,
+            &member.config_override_inherit_fields,
+        )?
+        .apply_to(&mut merged, core_defaults)?;
+    }
+    if let Some(config_override_patch) = &member.config_override_patch {
+        config_override_patch.apply_to(&mut merged, core_defaults)?;
+    }
+    restore_central_fields(&mut merged, central_config);
+    Ok(merged)
+}
+
+fn restore_central_fields(merged: &mut NetworkConfig, base: NetworkConfig) {
     merged.instance_id = base.instance_id;
     merged.dhcp = base.dhcp;
     merged.dhcp_ipv4_cidr = base.dhcp_ipv4_cidr;
@@ -209,7 +243,6 @@ fn apply_member_override(
     merged.managed_credentials = base.managed_credentials;
     merged.acl = base.acl;
     merged.credential_file = None;
-    merged
 }
 
 fn validate_network(intent: &CentralNetworkIntent) -> Result<(), CompileError> {
@@ -813,6 +846,8 @@ mod tests {
             virtual_ipv4: None,
             allocated_ipv4: None,
             config_override: None,
+            config_override_patch: None,
+            config_override_inherit_fields: Default::default(),
             credential_id: credential_id.map(str::to_owned),
             acl_group_secret: credential_id
                 .is_none()
@@ -880,7 +915,65 @@ mod tests {
                     }],
                 }],
             }),
+            config_defaults: Default::default(),
         }
+    }
+
+    #[test]
+    fn network_defaults_apply_before_member_overrides() {
+        use crate::central_network::config_patch::{NetworkConfigField, NetworkConfigPatch};
+        use std::collections::BTreeSet;
+
+        let mut network = intent();
+        network.config_defaults = NetworkConfigPatch {
+            values: NetworkConfig {
+                enable_udp_fec: Some(true),
+                enable_kcp_proxy: Some(true),
+                ..Default::default()
+            },
+            set_fields: [
+                NetworkConfigField::EnableUdpFec,
+                NetworkConfigField::EnableKcpProxy,
+            ]
+            .into_iter()
+            .collect(),
+            clear_fields: BTreeSet::new(),
+        };
+
+        // A member without overrides inherits the network defaults.
+        let compiled = compile(&network).unwrap();
+        let device_a = compiled
+            .members
+            .iter()
+            .find(|member| member.device_id == "device-a")
+            .unwrap();
+        assert_eq!(device_a.network_config.enable_udp_fec, Some(true));
+        assert_eq!(device_a.network_config.enable_kcp_proxy, Some(true));
+
+        // A legacy snapshot overrides only its own fields; a field marked
+        // inherited defers to the network default, and central identity
+        // fields stay authoritative either way.
+        network.members[1].config_override = Some(NetworkConfig {
+            enable_udp_fec: Some(false),
+            enable_kcp_proxy: Some(false),
+            hostname: Some("hijack".to_owned()),
+            ..Default::default()
+        });
+        network.members[1]
+            .config_override_inherit_fields
+            .insert(NetworkConfigField::EnableKcpProxy);
+        let compiled = compile(&network).unwrap();
+        let device_a = compiled
+            .members
+            .iter()
+            .find(|member| member.device_id == "device-a")
+            .unwrap();
+        assert_eq!(device_a.network_config.enable_udp_fec, Some(false));
+        assert_eq!(device_a.network_config.enable_kcp_proxy, Some(true));
+        assert_eq!(
+            device_a.network_config.hostname.as_deref(),
+            Some("device-a")
+        );
     }
 
     #[test]
