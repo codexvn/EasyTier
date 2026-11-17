@@ -247,6 +247,12 @@ disable_udp_hole_punching_help: Disable udp hole punching
 
 enable_udp_broadcast_relay: UDP Broadcast Relay
 enable_udp_broadcast_relay_help: "Windows only: capture local UDP broadcast packets from physical interfaces and forward them to EasyTier peers. Helps games to find rooms in local network. Requires administrator privileges."
+enable_udp_fec: UDP Forward Error Correction
+enable_udp_fec_help: "Request bidirectional forward error correction on UDP connections with supporting peers; only one peer needs to enable it."
+enable_udp_fec_kcp: Include KCP in UDP FEC
+enable_udp_fec_kcp_help: "Include KCP proxy traffic in UDP forward error correction when either peer enables UDP FEC."
+enable_udp_fec_quic: Include QUIC in UDP FEC
+enable_udp_fec_quic_help: "Include QUIC proxy traffic in UDP forward error correction when either peer enables UDP FEC."
 
 disable_upnp: Disable UPnP
 disable_upnp_help: Disable runtime UPnP/NAT-PMP port mapping for eligible listeners; automatic port mapping is enabled by default.
@@ -547,6 +553,11 @@ web:
     static_ip: Static Virtual IP
     static_ip_hint: Leave empty for DHCP; a fixed IP (/24) is assigned when set
     settings: Network Settings
+    network_defaults: Advanced Defaults
+    network_defaults_hint: These settings apply to every network member as defaults; fields explicitly set in a member's advanced configuration take precedence. Unset items follow the core defaults and are not published as off.
+    network_defaults_reset: Reset to current defaults
+    network_defaults_save: Save advanced defaults
+    network_defaults_reset_done: Server core defaults applied; member fields equal to the defaults now inherit them
     regenerate_secret: Regenerate network secret
     danger_zone: Danger Zone
     delete: Delete Network

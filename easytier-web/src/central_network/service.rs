@@ -18,6 +18,7 @@ use rand::{RngCore as _, rngs::OsRng};
 use sea_orm::{ColumnTrait as _, EntityTrait as _, QueryFilter as _, QueryOrder as _};
 use uuid::Uuid;
 
+use super::config_patch::{current_core_defaults, NetworkConfigField, NetworkConfigPatch};
 use super::model::{
     AclPolicy, CentralNetworkIntent, CredentialGrant, NetworkCredentialIntent, NetworkMemberIntent,
     NetworkMode, member_group_name,
@@ -420,6 +421,7 @@ impl CentralNetworkService {
             members: Vec::new(),
             credentials: Vec::new(),
             acl_policy: None,
+            config_defaults: Default::default(),
         };
         let network_id = intent.id;
         self.persist(intent).await?;
@@ -651,6 +653,8 @@ impl CentralNetworkService {
                 virtual_ipv4: None,
                 allocated_ipv4: None,
                 config_override: None,
+                config_override_patch: None,
+                config_override_inherit_fields: BTreeSet::new(),
                 credential_id,
                 acl_group_secret: (!request.temporary && intent.acl_policy.is_some())
                     .then(random_secret),
@@ -746,8 +750,87 @@ impl CentralNetworkService {
         let mut intent = self.load(user_id, network_id).await?;
         let position = member_position(&intent, device_id)?;
         intent.members[position].config_override = None;
+        intent.members[position].config_override_patch = None;
+        intent.members[position].config_override_inherit_fields = BTreeSet::new();
         sync_member_credential_proxy_cidrs(&mut intent, position)?;
         self.persist(intent).await?;
+        Ok(())
+    }
+
+    pub async fn get_config_defaults(
+        &self,
+        user_id: UserIdInDb,
+        network_id: Uuid,
+    ) -> Result<NetworkConfigPatch, CentralNetworkServiceError> {
+        let intent = self.load(user_id, network_id).await?;
+        Ok(intent.config_defaults)
+    }
+
+    pub async fn update_config_defaults(
+        &self,
+        user_id: UserIdInDb,
+        network_id: Uuid,
+        defaults: NetworkConfigPatch,
+    ) -> Result<NetworkConfigPatch, CentralNetworkServiceError> {
+        let _mutation = self.mutation_lock.lock().await;
+        let defaults = Self::accepted_config_defaults(defaults)?;
+        let mut intent = self.load(user_id, network_id).await?;
+        let core_defaults = current_core_defaults()
+            .map_err(|error| CentralNetworkServiceError::Database(error.to_string()))?;
+        Self::mark_member_fields_inherited(&mut intent, &defaults, &core_defaults)?;
+        intent.config_defaults = defaults.clone();
+        self.persist(intent).await?;
+        Ok(defaults)
+    }
+
+    pub async fn reset_config_defaults(
+        &self,
+        user_id: UserIdInDb,
+        network_id: Uuid,
+    ) -> Result<NetworkConfigPatch, CentralNetworkServiceError> {
+        let _mutation = self.mutation_lock.lock().await;
+        let core_defaults = current_core_defaults()
+            .map_err(|error| CentralNetworkServiceError::Database(error.to_string()))?;
+        let defaults = NetworkConfigPatch::reset_to_defaults(&core_defaults)
+            .map_err(|error| CentralNetworkServiceError::Invalid(error.to_string()))?;
+        let mut intent = self.load(user_id, network_id).await?;
+        Self::mark_member_fields_inherited(&mut intent, &defaults, &core_defaults)?;
+        intent.config_defaults = defaults.clone();
+        self.persist(intent).await?;
+        Ok(defaults)
+    }
+
+    fn accepted_config_defaults(
+        defaults: NetworkConfigPatch,
+    ) -> Result<NetworkConfigPatch, CentralNetworkServiceError> {
+        defaults
+            .validate_network_defaults()
+            .map_err(|error| CentralNetworkServiceError::Invalid(error.to_string()))?;
+        defaults
+            .sanitize()
+            .map_err(|error| CentralNetworkServiceError::Invalid(error.to_string()))
+    }
+
+    fn mark_member_fields_inherited(
+        intent: &mut CentralNetworkIntent,
+        defaults: &NetworkConfigPatch,
+        core_defaults: &easytier::common::config::NetworkConfig,
+    ) -> Result<(), CentralNetworkServiceError> {
+        let mut effective = core_defaults.clone();
+        defaults
+            .apply_to(&mut effective, core_defaults)
+            .map_err(|error| CentralNetworkServiceError::Invalid(error.to_string()))?;
+        for member in &mut intent.members {
+            if let Some(patch) = member.config_override_patch.as_mut() {
+                patch
+                    .remove_fields_equal_to(&effective, core_defaults)
+                    .map_err(|error| CentralNetworkServiceError::Invalid(error.to_string()))?;
+            } else if let Some(snapshot) = member.config_override.as_ref() {
+                member.config_override_inherit_fields =
+                    NetworkConfigPatch::matching_network_fields(snapshot, &effective)
+                        .map_err(|error| CentralNetworkServiceError::Invalid(error.to_string()))?;
+            }
+        }
         Ok(())
     }
 
@@ -1194,15 +1277,37 @@ fn sync_member_credential_proxy_cidrs(
     intent: &mut CentralNetworkIntent,
     member_position: usize,
 ) -> Result<(), CentralNetworkServiceError> {
+    let network_proxy_cidrs = if intent
+        .config_defaults
+        .set_fields
+        .contains(&NetworkConfigField::ProxyCidrs)
+    {
+        intent.config_defaults.values.proxy_cidrs.clone()
+    } else {
+        Vec::new()
+    };
     let member = &intent.members[member_position];
     let Some(credential_id) = member.credential_id.clone() else {
         return Ok(());
     };
-    let proxy_cidrs = member
-        .config_override
-        .as_ref()
-        .map(|config| config.proxy_cidrs.clone())
-        .unwrap_or_default();
+    let proxy_cidrs = if let Some(patch) = member.config_override_patch.as_ref() {
+        if patch.set_fields.contains(&NetworkConfigField::ProxyCidrs) {
+            patch.values.proxy_cidrs.clone()
+        } else {
+            network_proxy_cidrs
+        }
+    } else {
+        match member.config_override.as_ref() {
+            Some(config)
+                if !member
+                    .config_override_inherit_fields
+                    .contains(&NetworkConfigField::ProxyCidrs) =>
+            {
+                config.proxy_cidrs.clone()
+            }
+            _ => network_proxy_cidrs,
+        }
+    };
     let config = TomlConfigLoader::default();
     for cidr in &proxy_cidrs {
         easytier_core::config::api_input::add_proxy_network_to_config(cidr, &config)
@@ -1596,6 +1701,99 @@ mod tests {
             peer_urls,
             ..standalone_settings()
         }
+    }
+
+    #[tokio::test]
+    async fn resetting_config_defaults_marks_equal_member_fields_inherited() {
+        use crate::central_network::config_patch::{current_core_defaults, NetworkConfigField};
+
+        let (service, user_id, _) = service().await;
+        let device_id = Uuid::new_v4();
+        register_device(&service, user_id, device_id).await;
+        let network = service
+            .create_network(user_id, standalone_settings(), None)
+            .await
+            .unwrap();
+        let network_id = Uuid::parse_str(&network.network_id).unwrap();
+        service
+            .add_members(
+                user_id,
+                network_id,
+                AddMembersReq {
+                    device_ids: vec![device_id.to_string()],
+                    temporary: false,
+                    ttl_seconds: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        // A legacy snapshot whose shared fields all equal the core defaults
+        // except one member-specific proxy CIDR list.
+        let core_defaults = current_core_defaults().unwrap();
+        let mut snapshot = core_defaults.clone();
+        snapshot.proxy_cidrs = vec!["10.90.0.0/24".to_owned()];
+        service
+            .set_member_config(user_id, network_id, device_id, snapshot)
+            .await
+            .unwrap();
+
+        let defaults = service
+            .reset_config_defaults(user_id, network_id)
+            .await
+            .unwrap();
+        let sample_inherited_field = *defaults.clear_fields.iter().next().unwrap();
+
+        let intent = service.load(user_id, network_id).await.unwrap();
+        let member = intent
+            .members
+            .iter()
+            .find(|member| member.device_id == device_id.to_string())
+            .unwrap();
+        // Fields equal to the reset default are now inherited from the
+        // network while the original snapshot is preserved verbatim.
+        assert!(member
+            .config_override_inherit_fields
+            .contains(&sample_inherited_field));
+        assert!(!member
+            .config_override_inherit_fields
+            .contains(&NetworkConfigField::ProxyCidrs));
+        let snapshot = member.config_override.as_ref().unwrap();
+        assert_eq!(snapshot.proxy_cidrs, vec!["10.90.0.0/24".to_owned()]);
+
+        // The compiled configuration keeps the member-specific proxy CIDR and
+        // carries the network-wide defaults for the inherited fields.
+        let compiled = crate::central_network::compiler::compile(&intent).unwrap();
+        let compiled_member = compiled
+            .members
+            .iter()
+            .find(|member| member.device_id == device_id.to_string())
+            .unwrap();
+        assert_eq!(
+            compiled_member.network_config.proxy_cidrs,
+            vec!["10.90.0.0/24".to_owned()]
+        );
+    }
+
+    #[tokio::test]
+    async fn updating_config_defaults_rejects_member_only_fields() {
+        use crate::central_network::config_patch::{NetworkConfigField, NetworkConfigPatch};
+
+        let (service, user_id, _) = service().await;
+        let network = service
+            .create_network(user_id, standalone_settings(), None)
+            .await
+            .unwrap();
+        let network_id = Uuid::parse_str(&network.network_id).unwrap();
+        let invalid = NetworkConfigPatch {
+            set_fields: [NetworkConfigField::VpnPortalClients].into_iter().collect(),
+            ..Default::default()
+        };
+        let error = service
+            .update_config_defaults(user_id, network_id, invalid)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("member-only"));
     }
 
     #[tokio::test]

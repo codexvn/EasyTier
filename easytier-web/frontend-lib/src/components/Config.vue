@@ -30,6 +30,10 @@ const props = defineProps<{
   hideSecureMode?: boolean
   /// Central members save their clients through the configuration owner.
   editVpnPortalClients?: boolean
+  /// Network-level defaults mode: hide the identity and basic panels and
+  /// the member-owned hostname field, leaving only the shareable advanced
+  /// settings.
+  networkDefaults?: boolean
 }>()
 
 defineEmits(['runNetwork'])
@@ -288,7 +292,7 @@ function removeVpnPortalClient(index: number) {
     <div class="flex flex-col h-full">
       <div class="flex flex-col">
         <div class="w-full self-center ">
-          <Panel :header="t('basic_settings')">
+          <Panel v-if="!networkDefaults" :header="t('basic_settings')">
             <div class="flex flex-col gap-y-2">
               <div class="flex flex-row gap-x-9 flex-wrap">
                 <div class="flex flex-col gap-2 basis-5/12 grow">
@@ -366,7 +370,7 @@ function removeVpnPortalClient(index: number) {
             </div>
           </Panel>
 
-          <Divider />
+          <Divider v-if="!networkDefaults" />
 
           <Panel :header="t('advanced_settings')" toggleable collapsed>
             <div class="flex flex-col gap-y-2">
@@ -387,7 +391,7 @@ function removeVpnPortalClient(index: number) {
                 </div>
               </div>
 
-              <div class="flex flex-row gap-x-9 flex-wrap">
+              <div v-if="!networkDefaults" class="flex flex-row gap-x-9 flex-wrap">
                 <div class="flex flex-col gap-2 basis-5/12 grow">
                   <label for="hostname">{{ t('hostname') }}</label>
                   <InputText id="hostname" v-model="curNetwork.hostname" aria-describedby="hostname-help" :format="true"
@@ -658,9 +662,9 @@ function removeVpnPortalClient(index: number) {
             </div>
           </Panel>
 
-          <Divider />
+          <Divider v-if="!networkDefaults" />
 
-          <Panel :header="t('acl.title')" toggleable collapsed>
+          <Panel v-if="!networkDefaults" :header="t('acl.title')" toggleable collapsed>
             <div v-if="curNetwork.acl" class="flex flex-col gap-y-2">
               <AclManager v-model="curNetwork.acl" />
             </div>
@@ -670,7 +674,7 @@ function removeVpnPortalClient(index: number) {
             </div>
           </Panel>
 
-          <div class="flex pt-6 justify-center">
+          <div v-if="!networkDefaults" class="flex pt-6 justify-center">
             <Button :label="actionLabel || t('run_network')" icon="pi pi-arrow-right" icon-pos="right" :disabled="configInvalid || credentialInvalid"
               @click="$emit('runNetwork', curNetwork)" />
           </div>

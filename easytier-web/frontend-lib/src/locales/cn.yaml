@@ -248,6 +248,12 @@ disable_udp_hole_punching_help: 禁用UDP打洞功能
 
 enable_udp_broadcast_relay: UDP 广播中继
 enable_udp_broadcast_relay_help: "仅 Windows：捕获物理网卡上的本机 UDP 广播包并转发给 EasyTier 对等节点，帮助局域网游戏发现房间。需要管理员权限。"
+enable_udp_fec: UDP 前向纠错
+enable_udp_fec_help: "请求在支持前向纠错的 UDP 对等连接上双向启用纠错，仅需一端开启。"
+enable_udp_fec_kcp: KCP 流量纳入 UDP 纠错
+enable_udp_fec_kcp_help: "任一端启用 UDP 前向纠错时，将 KCP 代理流量纳入纠错。"
+enable_udp_fec_quic: QUIC 流量纳入 UDP 纠错
+enable_udp_fec_quic_help: "任一端启用 UDP 前向纠错时，将 QUIC 代理流量纳入纠错。"
 
 disable_upnp: 禁用 UPnP
 disable_upnp_help: 禁用符合条件监听器的运行时 UPnP/NAT-PMP 端口映射；自动端口映射默认开启。
@@ -547,6 +553,11 @@ web:
     static_ip: 静态虚拟 IP
     static_ip_hint: 留空使用 DHCP；指定后该成员固定使用此 IP（/24）
     settings: 网络设置
+    network_defaults: 高级默认
+    network_defaults_hint: 此处设置作为全网络成员的默认配置下发；成员高级配置中明确设置的字段优先。未设置的项沿用核心默认值，不会以关闭状态下发。
+    network_defaults_reset: 重置为当前版本默认值
+    network_defaults_save: 保存高级默认
+    network_defaults_reset_done: 已采用服务端当前核心默认值，成员中与默认值相同的重复项已改为继承
     regenerate_secret: 重新生成网络密码
     danger_zone: 危险操作
     delete: 删除网络

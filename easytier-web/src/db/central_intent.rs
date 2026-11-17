@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::central_network::{
     compiler::{CompileError, compile},
+    config_patch::NetworkConfigPatch,
     model::{
         CentralNetworkIntent, CredentialGrant, NetworkCredentialIntent, NetworkMemberIntent,
         NetworkMode,
@@ -40,6 +41,8 @@ struct PreparedMember {
     virtual_ipv4: Option<String>,
     allocated_ipv4: Option<String>,
     override_config: Option<String>,
+    override_patch: Option<String>,
+    override_inherit_fields: String,
     credential_id: Option<String>,
     acl_group_secret: Option<String>,
     enabled: bool,
@@ -61,6 +64,7 @@ struct PreparedIntent {
     public_server_url: Option<String>,
     peer_urls: String,
     acl_policy: Option<String>,
+    config_defaults: String,
     members: Vec<PreparedMember>,
     credentials: Vec<PreparedCredential>,
 }
@@ -76,6 +80,13 @@ fn sqlx_context(context: &str, error: sqlx::Error) -> CentralIntentError {
 
 fn prepare_intent(intent: CentralNetworkIntent) -> Result<PreparedIntent, CentralIntentError> {
     let compiled = compile(&intent)?;
+    let config_defaults = intent
+        .config_defaults
+        .sanitize()
+        .map_err(|error| {
+            CentralIntentError::InvalidStoredData(format!("invalid network defaults: {error}"))
+        })?;
+    let config_defaults = json(&config_defaults)?;
     let (networking_method, public_server_url, raw_peer_urls) = match &intent.mode {
         NetworkMode::PublicServer { url } => ("PublicServer", Some(url.clone()), Vec::new()),
         NetworkMode::Manual { peer_urls } => ("Manual", None, peer_urls.clone()),
@@ -91,6 +102,21 @@ fn prepare_intent(intent: CentralNetworkIntent) -> Result<PreparedIntent, Centra
     for member in &intent.members {
         let device_id = Uuid::parse_str(&member.device_id)
             .map_err(|_| CentralIntentError::InvalidDeviceId(member.device_id.clone()))?;
+        let override_patch = member
+            .config_override_patch
+            .as_ref()
+            .map(|patch| {
+                patch
+                    .sanitize()
+                    .map_err(|error| {
+                        CentralIntentError::InvalidStoredData(format!(
+                            "invalid member configuration patch: {error}"
+                        ))
+                    })
+                    .and_then(|patch| json(&patch))
+            })
+            .transpose()?;
+        let override_inherit_fields = json(&member.config_override_inherit_fields)?;
         let compiled = compiled_by_member.get(&member.id);
         let allocated_ipv4 = match (member.virtual_ipv4.is_some(), member.enabled) {
             (true, _) => None,
@@ -119,6 +145,8 @@ fn prepare_intent(intent: CentralNetworkIntent) -> Result<PreparedIntent, Centra
             virtual_ipv4: member.virtual_ipv4.clone(),
             allocated_ipv4,
             override_config: member.config_override.as_ref().map(json).transpose()?,
+            override_patch,
+            override_inherit_fields,
             credential_id: member.credential_id.clone(),
             acl_group_secret: member.acl_group_secret.clone(),
             enabled: member.enabled,
@@ -143,6 +171,7 @@ fn prepare_intent(intent: CentralNetworkIntent) -> Result<PreparedIntent, Centra
     Ok(PreparedIntent {
         peer_urls: json(&raw_peer_urls)?,
         acl_policy: intent.acl_policy.as_ref().map(json).transpose()?,
+        config_defaults,
         intent,
         networking_method,
         public_server_url,
@@ -432,8 +461,8 @@ async fn persist_intent(
         INSERT INTO networks (
             user_id, id, display_name, network_name, network_secret,
             networking_method, public_server_url, peer_urls, virtual_cidr,
-            secure_mode, acl_policy, create_time, update_time
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            secure_mode, acl_policy, config_defaults, create_time, update_time
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, id) DO UPDATE SET
             display_name = excluded.display_name,
             network_name = excluded.network_name,
@@ -444,6 +473,7 @@ async fn persist_intent(
             virtual_cidr = excluded.virtual_cidr,
             secure_mode = excluded.secure_mode,
             acl_policy = excluded.acl_policy,
+            config_defaults = excluded.config_defaults,
             update_time = excluded.update_time
         "#,
     )
@@ -458,6 +488,7 @@ async fn persist_intent(
     .bind(&prepared.intent.virtual_cidr)
     .bind(prepared.intent.secure_mode)
     .bind(&prepared.acl_policy)
+    .bind(&prepared.config_defaults)
     .bind(now)
     .bind(now)
     .execute(&mut **transaction)
@@ -514,9 +545,10 @@ async fn persist_intent(
             r#"
             INSERT INTO network_members (
                 user_id, network_id, id, device_id, hostname_override,
-                virtual_ipv4, allocated_ipv4, override_config, credential_id,
-                acl_group_secret, enabled, create_time, update_time
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                virtual_ipv4, allocated_ipv4, override_config, override_patch,
+                override_inherit_fields, credential_id, acl_group_secret,
+                enabled, create_time, update_time
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(prepared.intent.user_id)
@@ -527,6 +559,8 @@ async fn persist_intent(
         .bind(&member.virtual_ipv4)
         .bind(&member.allocated_ipv4)
         .bind(&member.override_config)
+        .bind(&member.override_patch)
+        .bind(&member.override_inherit_fields)
         .bind(&member.credential_id)
         .bind(&member.acl_group_secret)
         .bind(member.enabled)
@@ -562,11 +596,13 @@ async fn load_intent(
         Option<String>,
         bool,
         Option<String>,
+        String,
     );
     let row: Option<NetworkRow> = sqlx::query_as(
         r#"
         SELECT display_name, network_name, network_secret, networking_method,
-            public_server_url, peer_urls, virtual_cidr, secure_mode, acl_policy
+            public_server_url, peer_urls, virtual_cidr, secure_mode, acl_policy,
+            config_defaults
         FROM networks WHERE user_id = ? AND id = ?
         "#,
     )
@@ -585,6 +621,7 @@ async fn load_intent(
         virtual_cidr,
         secure_mode,
         acl_policy,
+        config_defaults,
     )) = row
     else {
         return Ok(None);
@@ -618,6 +655,13 @@ async fn load_intent(
         .map_err(|error| {
             CentralIntentError::InvalidStoredData(format!("invalid ACL policy: {error}"))
         })?;
+    let config_defaults: NetworkConfigPatch = serde_json::from_str(&config_defaults).map_err(
+        |error| {
+            CentralIntentError::InvalidStoredData(format!(
+                "invalid network config defaults: {error}"
+            ))
+        },
+    )?;
 
     type CredentialRow = (String, String, i64, String, bool, String, bool);
     let credential_rows: Vec<CredentialRow> = sqlx::query_as(
@@ -671,13 +715,16 @@ async fn load_intent(
         Option<String>,
         Option<String>,
         Option<String>,
+        String,
+        Option<String>,
         Option<String>,
         bool,
     );
     let member_rows: Vec<MemberRow> = sqlx::query_as(
         r#"
         SELECT allocated_ipv4, id, device_id, hostname_override, virtual_ipv4,
-            override_config, credential_id, acl_group_secret, enabled
+            override_config, override_patch, override_inherit_fields,
+            credential_id, acl_group_secret, enabled
         FROM network_members
         WHERE user_id = ? AND network_id = ?
         ORDER BY id
@@ -698,6 +745,8 @@ async fn load_intent(
                 hostname,
                 virtual_ipv4,
                 override_config,
+                override_patch,
+                override_inherit_fields,
                 credential_id,
                 acl_group_secret,
                 enabled,
@@ -719,6 +768,23 @@ async fn load_intent(
                                 "invalid member override: {error}"
                             ))
                         })?,
+                    config_override_patch: override_patch
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()
+                        .map_err(|error| {
+                            CentralIntentError::InvalidStoredData(format!(
+                                "invalid member configuration patch: {error}"
+                            ))
+                        })?,
+                    config_override_inherit_fields: serde_json::from_str(
+                        &override_inherit_fields,
+                    )
+                    .map_err(|error| {
+                        CentralIntentError::InvalidStoredData(format!(
+                            "invalid inherited member fields: {error}"
+                        ))
+                    })?,
                     credential_id,
                     acl_group_secret,
                     enabled,
@@ -739,6 +805,7 @@ async fn load_intent(
         members,
         credentials,
         acl_policy,
+        config_defaults,
     }))
 }
 
@@ -766,6 +833,8 @@ mod tests {
             virtual_ipv4: None,
             allocated_ipv4: None,
             config_override: None,
+            config_override_patch: None,
+            config_override_inherit_fields: Default::default(),
             credential_id: credential_id.map(str::to_owned),
             acl_group_secret: None,
             enabled: true,
@@ -800,6 +869,7 @@ mod tests {
                 },
             }],
             acl_policy: None,
+            config_defaults: Default::default(),
         }
     }
 

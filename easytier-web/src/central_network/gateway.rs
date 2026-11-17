@@ -536,6 +536,7 @@ mod tests {
             members: Vec::new(),
             credentials: Vec::new(),
             acl_policy: None,
+            config_defaults: Default::default(),
         }
     }
 

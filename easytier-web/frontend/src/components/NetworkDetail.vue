@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { Button, Column, ConfirmDialog, DataTable, Dialog, Drawer, InputSwitch, InputText, Message, ProgressSpinner, ScrollPanel, Select, SelectButton, Skeleton, Tab, TabList, TabPanel, TabPanels, Tabs, Tag, useConfirm, useToast } from 'primevue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { Config, NetworkTypes, UrlListInput, Utils } from 'easytier-frontend-lib';
+import { Config, NetworkDefaults, NetworkTypes, UrlListInput, Utils } from 'easytier-frontend-lib';
 import AclPolicyTab from './AclPolicyTab.vue';
 import ApiClient, { type CentralNetworkDetail, type CentralNetworkMember, type NetworkCredential, type NodeAclRuleStat, type NodePeerInfo, type NodeRouteInfo, type TemporaryPeer } from '../modules/api';
 import { normalizeVirtualSubnet } from '../modules/virtual-subnet';
@@ -399,6 +399,61 @@ const saveSettings = async () => {
         toast.add({ severity: 'error', summary: t('web.network_detail.settings'), detail: e?.response?.data?.message ?? String(e), life: 5000 });
     } finally {
         savingSettings.value = false;
+    }
+};
+
+// --- network advanced defaults (settings tab) ---
+
+const defaultsLoaded = ref(false);
+const defaultsForm = ref<NetworkTypes.NetworkConfig>(NetworkTypes.DEFAULT_NETWORK_CONFIG());
+const defaultsBaseline = ref<NetworkTypes.NetworkConfig>(NetworkTypes.DEFAULT_NETWORK_CONFIG());
+const savingDefaults = ref(false);
+const resettingDefaults = ref(false);
+let defaultsRequest = 0;
+
+const loadDefaultsForm = async () => {
+    const request = ++defaultsRequest;
+    try {
+        const patch = await api?.get_network_config_defaults(networkId.value);
+        if (!patch || request !== defaultsRequest) return;
+        defaultsForm.value = NetworkDefaults.draftFromPatch(patch);
+        defaultsBaseline.value = NetworkDefaults.draftFromPatch(patch);
+        defaultsLoaded.value = true;
+    } catch (e: any) {
+        if (request !== defaultsRequest) return;
+        toast.add({ severity: 'error', summary: t('web.network_detail.network_defaults'), detail: e?.response?.data?.message ?? String(e), life: 5000 });
+    }
+};
+
+const saveDefaults = async () => {
+    savingDefaults.value = true;
+    try {
+        const patch = NetworkDefaults.patchFromDraft(defaultsBaseline.value, defaultsForm.value);
+        await api?.update_network_config_defaults(networkId.value, patch);
+        defaultsBaseline.value = NetworkDefaults.draftFromPatch(patch);
+        await loadAll();
+        toast.add({ severity: 'success', summary: t('web.network_detail.network_defaults'), detail: t('web.device_management.config_saved'), life: 2000 });
+    } catch (e: any) {
+        toast.add({ severity: 'error', summary: t('web.network_detail.network_defaults'), detail: e?.response?.data?.message ?? String(e), life: 5000 });
+    } finally {
+        savingDefaults.value = false;
+    }
+};
+
+const resetDefaults = async () => {
+    resettingDefaults.value = true;
+    try {
+        const patch = await api?.reset_network_config_defaults(networkId.value);
+        if (patch) {
+            defaultsForm.value = NetworkDefaults.draftFromPatch(patch);
+            defaultsBaseline.value = NetworkDefaults.draftFromPatch(patch);
+        }
+        await loadAll();
+        toast.add({ severity: 'success', summary: t('web.network_detail.network_defaults'), detail: t('web.network_detail.network_defaults_reset_done'), life: 3000 });
+    } catch (e: any) {
+        toast.add({ severity: 'error', summary: t('web.network_detail.network_defaults'), detail: e?.response?.data?.message ?? String(e), life: 5000 });
+    } finally {
+        resettingDefaults.value = false;
     }
 };
 
@@ -871,6 +926,7 @@ const switchTab = async (tab: string) => {
         // list and saving would silently downgrade it to Standalone.
         await loadGatewayInfo();
         loadSettingsForm();
+        loadDefaultsForm();
     }
 };
 </script>
@@ -1219,6 +1275,20 @@ const switchTab = async (tab: string) => {
                 <div class="flex gap-2">
                     <Button :label="t('web.common.save')" icon="pi pi-check" :loading="savingSettings" @click="saveSettings" />
                 </div>
+                <details class="border border-surface-200 dark:border-surface-700 rounded-md p-3">
+                    <summary class="cursor-pointer font-medium">{{ t('web.network_detail.network_defaults') }}</summary>
+                    <div class="flex flex-col gap-2 mt-3">
+                        <div class="text-sm text-500">{{ t('web.network_detail.network_defaults_hint') }}</div>
+                        <div class="flex gap-2 flex-wrap">
+                            <Button :label="t('web.network_detail.network_defaults_reset')" icon="pi pi-refresh"
+                                severity="secondary" outlined :loading="resettingDefaults" @click="resetDefaults" />
+                            <Button :label="t('web.network_detail.network_defaults_save')" icon="pi pi-check"
+                                :loading="savingDefaults" :disabled="!defaultsLoaded" @click="saveDefaults" />
+                        </div>
+                        <Config v-if="defaultsLoaded" v-model:cur-network="defaultsForm" :config-invalid="false"
+                            :hide-secure-mode="true" :network-defaults="true" />
+                    </div>
+                </details>
                 <div class="mt-6 pt-4 border-t border-red-200 flex flex-col gap-2">
                     <div class="text-lg font-semibold text-red-500">{{ t('web.network_detail.danger_zone') }}</div>
                     <div class="text-sm text-500">{{ t('web.network_detail.delete_hint') }}</div>

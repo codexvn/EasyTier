@@ -1,5 +1,5 @@
 import axios, { AxiosError, AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
-import { type Api, NetworkTypes, Utils } from 'easytier-frontend-lib';
+import { type Api, NetworkDefaults, NetworkTypes, Utils } from 'easytier-frontend-lib';
 import { Md5 } from 'ts-md5';
 
 export interface ValidateConfigResponse {
@@ -377,6 +377,18 @@ export class ApiClient {
 
     public async delete_network(network_id: string): Promise<undefined> {
         await this.client.delete(`/networks/${network_id}`);
+    }
+
+    public async get_network_config_defaults(network_id: string): Promise<NetworkDefaults.NetworkConfigPatch> {
+        return await this.client.get<any, NetworkDefaults.NetworkConfigPatch>(`/networks/${network_id}/config-defaults`);
+    }
+
+    public async update_network_config_defaults(network_id: string, defaults: NetworkDefaults.NetworkConfigPatch): Promise<NetworkDefaults.NetworkConfigPatch> {
+        return await this.client.put<any, NetworkDefaults.NetworkConfigPatch>(`/networks/${network_id}/config-defaults`, defaults);
+    }
+
+    public async reset_network_config_defaults(network_id: string): Promise<NetworkDefaults.NetworkConfigPatch> {
+        return await this.client.post<any, NetworkDefaults.NetworkConfigPatch>(`/networks/${network_id}/config-defaults/reset`);
     }
 
     public async list_network_members(network_id: string): Promise<{ members: CentralNetworkMember[]; temporary_peers: TemporaryPeer[] }> {

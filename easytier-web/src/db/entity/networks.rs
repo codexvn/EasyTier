@@ -27,6 +27,8 @@ pub struct Model {
     pub secure_mode: bool,
     #[sea_orm(column_type = "Text", nullable)]
     pub acl_policy: Option<String>,
+    #[sea_orm(column_type = "Text")]
+    pub config_defaults: String,
     pub create_time: DateTimeWithTimeZone,
     pub update_time: DateTimeWithTimeZone,
 }
