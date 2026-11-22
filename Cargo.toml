@@ -116,6 +116,13 @@ codegen-units = 1
 opt-level = 3
 strip = true
 
+# 本地快速迭代用：保留 opt-level=3（吞吐数据仍有参考价值），
+# 去掉全量 LTO 与单 codegen-unit，产物在 target/quick/ 下。
+[profile.quick]
+inherits = "release"
+lto = false
+codegen-units = 16
+
 [profile.mini]
 inherits = "release"
 opt-level = "z"
