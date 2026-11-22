@@ -68,7 +68,11 @@ pub(crate) struct MpscTunnelReceiver {
 
 impl MpscTunnelReceiver {
     pub(crate) fn channel(connection: bool) -> (MpscTunnelSender, Self) {
-        let (sender, receiver) = channel(32);
+        // Peer-connection queues bound the in-flight window: 32 packets of
+        // ~1.4KB caps WAN throughput at ~44KB/RTT. Size the ordinary queue
+        // for the bandwidth-delay product (512 * ~1.4KB ~= 700KB in flight).
+        let ordinary_capacity = if connection { 512 } else { 32 };
+        let (sender, receiver) = channel(ordinary_capacity);
         let (heartbeat_tx, heartbeat_rx) = if connection {
             let (tx, rx) = channel(8);
             (Some(tx), Some(rx))
