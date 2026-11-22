@@ -1,0 +1,82 @@
+name: EasyTier Quick
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main-fix", "fix/**" ]
+
+concurrency:
+  # Same-branch pushes cancel the older quick build.
+  group: quick-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+defaults:
+  run:
+    # necessary for windows
+    shell: bash
+
+jobs:
+  quick-build:
+    # Strictly fix-branch only, even when dispatched manually.
+    if: github.ref_name == 'main-fix' || startsWith(github.ref_name, 'fix/')
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - TARGET: x86_64-unknown-linux-musl
+            OS: ubuntu-24.04
+            FEATURES: jemalloc
+            ARTIFACT_NAME: quick-linux-x86_64
+          - TARGET: x86_64-pc-windows-msvc
+            OS: windows-latest
+            FEATURES: mimalloc
+            ARTIFACT_NAME: quick-windows-x86_64
+    runs-on: ${{ matrix.OS }}
+    timeout-minutes: 45
+    env:
+      TARGET: ${{ matrix.TARGET }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Prepare build environment
+        uses: ./.github/actions/prepare-build
+        with:
+          target: ${{ matrix.TARGET }}
+          gui: false
+          pnpm: false
+          token: ${{ github.token }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: core-quick-${{ matrix.TARGET }}
+          cache-targets: "true"
+
+      - name: Build
+        run: cargo build --profile quick --locked --target ${{ matrix.TARGET }} --package easytier --features ${{ matrix.FEATURES }}
+
+      - name: Collect artifact
+        run: |
+          SUFFIX=""
+          if [[ "$TARGET" == *windows* ]]; then
+            SUFFIX=".exe"
+          fi
+
+          mkdir -p ./quick-artifacts
+          cp "target/$TARGET/quick/easytier-core$SUFFIX" ./quick-artifacts/
+          cp "target/$TARGET/quick/easytier-cli$SUFFIX" ./quick-artifacts/
+
+          # Windows runtime drivers, same set the release workflow ships.
+          if [[ "$TARGET" == x86_64-pc-windows-msvc ]]; then
+            find "easytier/third_party/x86_64" -maxdepth 1 -type f \
+              \( -name "*.dll" -o -name "*.sys" \) -exec cp {} ./quick-artifacts/ \;
+          fi
+
+      - name: Archive artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: easytier-${{ matrix.ARTIFACT_NAME }}
+          path: ./quick-artifacts/*
+          retention-days: 7
