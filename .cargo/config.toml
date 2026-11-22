@@ -9,6 +9,10 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 [target.'cfg(all(windows, target_env = "msvc"))']
 rustflags = ["-C", "target-feature=+crt-static"]
 
+# 本地快速迭代：MSVC 目标改用 rust-lld 链接器（删除此段即回退 link.exe）
+[target.x86_64-pc-windows-msvc]
+linker = "rust-lld"
+
 [target.wasm32-unknown-unknown]
 rustflags = [
     "-C",
