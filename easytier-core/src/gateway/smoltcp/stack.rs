@@ -56,8 +56,8 @@ impl SmolTcpStack {
                 format!("{local_ip}/24").parse().unwrap(),
                 vec![format!("{local_ip}").parse().unwrap()],
                 Some(BufferSize {
-                    tcp_rx_size: 1024 * 16,
-                    tcp_tx_size: 1024 * 16,
+                    tcp_rx_size: 1024 * 128,
+                    tcp_tx_size: 1024 * 128,
                     ..Default::default()
                 }),
             ),
